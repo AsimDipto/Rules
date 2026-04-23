@@ -16,31 +16,27 @@ jobs:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          # Fetch project names and handle potential empty response
           PROJECTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects" \
             -H "X-Auth-Email: $CF_EMAIL" \
             -H "X-Auth-Key: $CF_API_KEY" \
             -H "Content-Type: application/json" | jq -r '.result[]?.name // empty')
 
           for PROJECT in $PROJECTS; do
-            echo "Checking Project: $PROJECT"
+            echo "Processing: $PROJECT"
             
-            # Use '?' to handle nulls gracefully and only pick IDs after the 50th one
-            IDS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments?per_page=100" \
+            # Keep latest 50, fetch up to 1000 old ones
+            IDS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments?per_page=1000" \
               -H "X-Auth-Email: $CF_EMAIL" \
               -H "X-Auth-Key: $CF_API_KEY" \
               -H "Content-Type: application/json" | jq -r '.result[50:]? | .[]?.id // empty')
 
-            if [ -n "$IDS" ] && [ "$IDS" != "null" ]; then
+            if [ -n "$IDS" ]; then
               for ID in $IDS; do
-                echo "Deleting: $ID from $PROJECT"
                 curl -s -X DELETE "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments/$ID?force=true" \
                   -H "X-Auth-Email: $CF_EMAIL" \
                   -H "X-Auth-Key: $CF_API_KEY" \
                   -H "Content-Type: application/json"
-                sleep 0.5
+                sleep 0.1
               done
-            else
-              echo "No old deployments found for $PROJECT (kept latest 50)."
             fi
           done
