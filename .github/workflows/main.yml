@@ -16,26 +16,29 @@ jobs:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          # Automatically fetch all project names
           PROJECTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects" \
             -H "X-Auth-Email: $CF_EMAIL" \
             -H "X-Auth-Key: $CF_API_KEY" \
-            -H "Content-Type: application/json" | jq -r '.result[].name')
+            -H "Content-Type: application/json" | jq -r '.result[].name // empty')
 
           for PROJECT in $PROJECTS; do
-            # Get deployment IDs skipping the latest 50
+            echo "Checking Project: $PROJECT"
+            
             IDS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments?per_page=100" \
               -H "X-Auth-Email: $CF_EMAIL" \
               -H "X-Auth-Key: $CF_API_KEY" \
-              -H "Content-Type: application/json" | jq -r '.result[50:][].id' 2>/dev/null)
+              -H "Content-Type: application/json" | jq -r '.result[50:][].id // empty')
 
-            if [ "$IDS" != "null" ] && [ -n "$IDS" ]; then
+            if [ ! -z "$IDS" ]; then
               for ID in $IDS; do
+                echo "Deleting: $ID"
                 curl -s -X DELETE "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments/$ID?force=true" \
                   -H "X-Auth-Email: $CF_EMAIL" \
                   -H "X-Auth-Key: $CF_API_KEY" \
                   -H "Content-Type: application/json"
                 sleep 0.5
               done
+            else
+              echo "No old deployments to delete for $PROJECT"
             fi
           done
