@@ -10,41 +10,66 @@ jobs:
   force-cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Purge All Old Deployments
+      - name: Run Purge Script
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        shell: python
         run: |
-          # Fetch all projects
-          PROJECTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects" \
-            -H "X-Auth-Email: $CF_EMAIL" \
-            -H "X-Auth-Key: $CF_API_KEY" \
-            -H "Content-Type: application/json" | jq -r '.result[]?.name // empty')
+          import requests
+          import os
+          import time
 
-          for PROJECT in $PROJECTS; do
-            echo "Targeting Project: $PROJECT"
-            
-            # Loop to handle more than 100 deployments (Cloudflare limits per request)
-            while true; do
-              # Get IDs skipping latest 50
-              IDS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments?per_page=100" \
-                -H "X-Auth-Email: $CF_EMAIL" \
-                -H "X-Auth-Key: $CF_API_KEY" \
-                -H "Content-Type: application/json" | jq -r '.result[50:]? | .[]?.id // empty')
+          EMAIL = os.getenv("CF_EMAIL")
+          API_KEY = os.getenv("CF_API_KEY")
+          ACC_ID = os.getenv("ACC_ID")
 
-              if [ -z "$IDS" ]; then
-                echo "Finished or under 50 for $PROJECT"
-                break
-              fi
+          headers = {
+              "X-Auth-Email": EMAIL, 
+              "X-Auth-Key": API_KEY, 
+              "Content-Type": "application/json"
+          }
 
-              for ID in $IDS; do
-                # Direct deletion matching your python logic
-                curl -s -X DELETE "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments/$ID?force=true" \
-                  -H "X-Auth-Email: $CF_EMAIL" \
-                  -H "X-Auth-Key: $CF_API_KEY" \
-                  -H "Content-Type: application/json"
-                sleep 0.2
-              done
-            done
-          done
+          def purge():
+              proj_url = f"https://api.cloudflare.com/client/v4/accounts/{ACC_ID}/pages/projects"
+              try:
+                  res = requests.get(proj_url, headers=headers).json()
+                  projects = res.get('result', [])
+              except Exception as e:
+                  print(f"Error fetching projects: {e}")
+                  return
+
+              for p in projects:
+                  proj_name = p['name']
+                  print(f"\n--- Checking Project: {proj_name} ---")
+                  dep_url = f"{proj_url}/{proj_name}/deployments"
+                  
+                  while True:
+                      try:
+                          res = requests.get(f"{dep_url}?per_page=100", headers=headers).json()
+                          items = res.get('result', [])
+                          
+                          if not items or len(items) <= 50:
+                              print(f"Project {proj_name} is clean (50 or less left).")
+                              break
+                          
+                          to_delete = items[50:]
+                          print(f"Found {len(to_delete)} deployments to remove from {proj_name}...")
+                          
+                          for d in to_delete:
+                              d_id = d['id']
+                              del_res = requests.delete(f"{dep_url}/{d_id}?force=true", headers=headers).json()
+                              if del_res.get('success'):
+                                  print(f"Deleted: {d_id}")
+                              else:
+                                  print(f"Failed: {d_id}")
+                              time.sleep(0.3)
+                          
+                          time.sleep(1)
+                      except Exception as e:
+                          print(f"Error in loop: {e}")
+                          break
+
+          if __name__ == "__main__":
+              purge()
