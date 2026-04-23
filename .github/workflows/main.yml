@@ -1,47 +1,44 @@
-name: Cloudflare Automatic Cleanup
+name: Cleanup
 
 on:
   deployment_status:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
-  auto-cleanup:
+  force-cleanup:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Cleanup All Cloudflare Pages
+      - name: Purge Old Deployments
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
-          # Get all project names
           projects=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects" \
             -H "X-Auth-Email: $CF_EMAIL" \
             -H "X-Auth-Key: $CF_API_KEY" \
             -H "Content-Type: application/json" | jq -r '.result[].name')
 
           for project in $projects; do
-            echo "--- Checking Project: $project ---"
+            echo "Checking: $project"
             
-            # Get deployment IDs skipping the first 50 (latest 50 are safe)
-            ids=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$project/deployments" \
+            ids=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$project/deployments?per_page=100" \
               -H "X-Auth-Email: $CF_EMAIL" \
               -H "X-Auth-Key: $CF_API_KEY" \
               -H "Content-Type: application/json" | jq -r '.result[50:][].id' 2>/dev/null)
 
             if [ -z "$ids" ] || [ "$ids" == "null" ]; then
-              echo "✅ No cleanup needed for $project."
+              echo "Clean"
             else
               for id in $ids; do
-                echo "🗑️ Deleting old deployment: $id"
                 curl -s -X DELETE "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$project/deployments/$id?force=true" \
                   -H "X-Auth-Email: $CF_EMAIL" \
                   -H "X-Auth-Key: $CF_API_KEY" \
                   -H "Content-Type: application/json"
-                sleep 0.5
+                sleep 0.2
               done
             fi
           done
