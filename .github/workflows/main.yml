@@ -1,4 +1,4 @@
-name: Cleanup
+name: Cloudflare Force Cleanup
 
 on:
   deployment_status:
@@ -8,7 +8,6 @@ on:
 
 jobs:
   force-cleanup:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Purge Old Deployments
@@ -17,6 +16,7 @@ jobs:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
+          # Get project names
           projects=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects" \
             -H "X-Auth-Email: $CF_EMAIL" \
             -H "X-Auth-Key: $CF_API_KEY" \
@@ -25,20 +25,20 @@ jobs:
           for project in $projects; do
             echo "Checking: $project"
             
+            # Fetch deployment IDs skipping latest 50
             ids=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$project/deployments?per_page=100" \
               -H "X-Auth-Email: $CF_EMAIL" \
               -H "X-Auth-Key: $CF_API_KEY" \
               -H "Content-Type: application/json" | jq -r '.result[50:][].id' 2>/dev/null)
 
-            if [ -z "$ids" ] || [ "$ids" == "null" ]; then
-              echo "Clean"
-            else
+            if [ "$ids" != "null" ] && [ -n "$ids" ]; then
               for id in $ids; do
+                echo "Deleting: $id"
                 curl -s -X DELETE "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$project/deployments/$id?force=true" \
                   -H "X-Auth-Email: $CF_EMAIL" \
                   -H "X-Auth-Key: $CF_API_KEY" \
                   -H "Content-Type: application/json"
-                sleep 0.2
+                sleep 0.5
               done
             fi
           done
