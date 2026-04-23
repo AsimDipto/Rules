@@ -10,33 +10,41 @@ jobs:
   force-cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Purge Old Deployments
+      - name: Purge All Old Deployments
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           ACC_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: |
+          # Fetch all projects
           PROJECTS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects" \
             -H "X-Auth-Email: $CF_EMAIL" \
             -H "X-Auth-Key: $CF_API_KEY" \
             -H "Content-Type: application/json" | jq -r '.result[]?.name // empty')
 
           for PROJECT in $PROJECTS; do
-            echo "Processing: $PROJECT"
+            echo "Targeting Project: $PROJECT"
             
-            # Keep latest 50, fetch up to 1000 old ones
-            IDS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments?per_page=1000" \
-              -H "X-Auth-Email: $CF_EMAIL" \
-              -H "X-Auth-Key: $CF_API_KEY" \
-              -H "Content-Type: application/json" | jq -r '.result[50:]? | .[]?.id // empty')
+            # Loop to handle more than 100 deployments (Cloudflare limits per request)
+            while true; do
+              # Get IDs skipping latest 50
+              IDS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments?per_page=100" \
+                -H "X-Auth-Email: $CF_EMAIL" \
+                -H "X-Auth-Key: $CF_API_KEY" \
+                -H "Content-Type: application/json" | jq -r '.result[50:]? | .[]?.id // empty')
 
-            if [ -n "$IDS" ]; then
+              if [ -z "$IDS" ]; then
+                echo "Finished or under 50 for $PROJECT"
+                break
+              fi
+
               for ID in $IDS; do
+                # Direct deletion matching your python logic
                 curl -s -X DELETE "https://api.cloudflare.com/client/v4/accounts/$ACC_ID/pages/projects/$PROJECT/deployments/$ID?force=true" \
                   -H "X-Auth-Email: $CF_EMAIL" \
                   -H "X-Auth-Key: $CF_API_KEY" \
                   -H "Content-Type: application/json"
-                sleep 0.1
+                sleep 0.2
               done
-            fi
+            done
           done
