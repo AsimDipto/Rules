@@ -10,7 +10,7 @@ jobs:
   force-cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Run Purge Script
+      - name: Purge
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
@@ -32,43 +32,30 @@ jobs:
           }
 
           def purge():
-              proj_url = f"https://api.cloudflare.com/client/v4/accounts/{ACC_ID}/pages/projects"
+              u = f"https://api.cloudflare.com/client/v4/accounts/{ACC_ID}/pages/projects"
               try:
-                  res = requests.get(proj_url, headers=headers).json()
-                  projects = res.get('result', [])
-              except Exception as e:
-                  print(f"Error fetching projects: {e}")
+                  ps = requests.get(u, headers=headers).json().get('result', [])
+              except:
                   return
 
-              for p in projects:
-                  proj_name = p['name']
-                  print(f"\n--- Checking Project: {proj_name} ---")
-                  dep_url = f"{proj_url}/{proj_name}/deployments"
+              for p in ps:
+                  name = p['name']
+                  d_url = f"{u}/{name}/deployments"
                   
                   while True:
                       try:
-                          res = requests.get(f"{dep_url}?per_page=100", headers=headers).json()
-                          items = res.get('result', [])
+                          r = requests.get(f"{d_url}?per_page=100", headers=headers).json()
+                          items = r.get('result', [])
                           
                           if not items or len(items) <= 50:
-                              print(f"Project {proj_name} is clean (50 or less left).")
                               break
                           
-                          to_delete = items[50:]
-                          print(f"Found {len(to_delete)} deployments to remove from {proj_name}...")
-                          
-                          for d in to_delete:
-                              d_id = d['id']
-                              del_res = requests.delete(f"{dep_url}/{d_id}?force=true", headers=headers).json()
-                              if del_res.get('success'):
-                                  print(f"Deleted: {d_id}")
-                              else:
-                                  print(f"Failed: {d_id}")
-                              time.sleep(0.3)
+                          for d in items[50:]:
+                              requests.delete(f"{d_url}/{d['id']}?force=true", headers=headers)
+                              time.sleep(2)
                           
                           time.sleep(1)
-                      except Exception as e:
-                          print(f"Error in loop: {e}")
+                      except:
                           break
 
           if __name__ == "__main__":
