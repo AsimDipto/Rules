@@ -1,16 +1,13 @@
 name: Cloudflare Force Cleanup
 
 on:
-  deployment_status:
-  schedule:
-    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
   force-cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Purge
+      - name: Run Cleanup
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
@@ -21,42 +18,47 @@ jobs:
           import os
           import time
 
-          EMAIL = os.getenv("CF_EMAIL")
-          API_KEY = os.getenv("CF_API_KEY")
-          ACC_ID = os.getenv("ACC_ID")
+          # Fetch secrets from environment
+          e = os.getenv("CF_EMAIL")
+          k = os.getenv("CF_API_KEY")
+          a = os.getenv("ACC_ID")
+          h = {"X-Auth-Email": e, "X-Auth-Key": k, "Content-Type": "application/json"}
 
-          headers = {
-              "X-Auth-Email": EMAIL, 
-              "X-Auth-Key": API_KEY, 
-              "Content-Type": "application/json"
-          }
-
-          def purge():
-              u = f"https://api.cloudflare.com/client/v4/accounts/{ACC_ID}/pages/projects"
+          def start():
+              # Fetch all projects
+              u = f"https://api.cloudflare.com/client/v4/accounts/{a}/pages/projects"
               try:
-                  ps = requests.get(u, headers=headers).json().get('result', [])
+                  res = requests.get(u, headers=h)
+                  if res.status_code != 200:
+                      print(f"Auth Failed: {res.status_code}")
+                      return
+                  ps = res.json().get('result', [])
               except:
                   return
 
               for p in ps:
                   name = p['name']
+                  print(f"Processing: {name}")
                   d_url = f"{u}/{name}/deployments"
                   
                   while True:
                       try:
-                          r = requests.get(f"{d_url}?per_page=100", headers=headers).json()
+                          # Check current deployments (keep latest 50)
+                          r = requests.get(f"{d_url}?per_page=100", headers=h).json()
                           items = r.get('result', [])
-                          
                           if not items or len(items) <= 50:
+                              print(f"Project {name} is clean.")
                               break
                           
+                          # Start deleting from index 50 onwards
                           for d in items[50:]:
-                              requests.delete(f"{d_url}/{d['id']}?force=true", headers=headers)
-                              time.sleep(2)
-                          
+                              requests.delete(f"{d_url}/{d['id']}?force=true", headers=h)
+                              print(f"Deleted: {d['id']}")
+                              time.sleep(2) # 2s gap as requested
                           time.sleep(1)
-                      except:
+                      except Exception as ex:
+                          print(f"Error: {ex}")
                           break
 
           if __name__ == "__main__":
-              purge()
+              start()
